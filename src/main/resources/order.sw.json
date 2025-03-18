@@ -5,7 +5,23 @@
   "name": "Order Workflow",
   "description": "Order Workflow Sample",
   "start": "Order Received",
-  
+  "functions": [
+    {
+      "name": "printMessage",
+      "type": "custom",
+      "operation": "sysout"
+    },
+    {
+      "name": "sendOrder",
+      "operation": "specs/supplier.yaml#sendOrder",
+      "type": "rest"
+    },
+    {
+      "name": "cancelOrder",
+      "operation": "specs/supplier.yaml#cancelOrder",
+      "type": "rest"
+    }
+  ],
   "events": [
     {
       "name": "orderEvent",
@@ -28,32 +44,32 @@
           "contextAttributeName": "orderid"
         }
       ]
-    }
-  ],
-  "functions": [
-    {
-      "name": "printMessage",
-      "type": "custom",
-      "operation": "sysout"
     },
     {
-      "name": "sendOrder",
-      "operation": "specs/supplier.yaml#sendOrder",
-      "type": "rest"
+      "name": "cancelEvent",
+      "kind": "consumed",
+      "type": "CancelEventType",
+      "source": "Client",
+      "correlation": [
+        {
+          "contextAttributeName": "orderid"
+        }
+      ]
     }
   ],
-  "states": [{
-    "name": "Order Received",
-    "type": "event",
-    "onEvents": [
-      {
-        "eventRefs": [
-          "orderEvent"
-        ]
-      }
-    ],
-    "transition": "Check Inventory"
-  },
+  "states": [
+    {
+      "name": "Order Received",
+      "type": "event",
+      "onEvents": [
+        {
+          "eventRefs": [
+            "orderEvent"
+          ]
+        }
+      ],
+      "transition": "Check Inventory"
+    },
     {
       "name": "Check Inventory",
       "type": "operation",
@@ -63,7 +79,7 @@
           "functionRef": {
             "refName": "printMessage",
             "arguments": {
-              "message": "\"Check Inventory: \" + .orderId"
+              "message": "\"Check Inventory \" + .orderId"
             }
           },
           "actionDataFilter": {
@@ -90,24 +106,41 @@
     {
       "name": "Prepare for Shipping",
       "type": "operation",
+      "transition": "Order Shipped or Cancelled",
+      "compensatedBy": "Restore Inventory",
       "actions": [
         {
           "name": "printAction",
           "functionRef": {
             "refName": "printMessage",
             "arguments": {
-              "message": "\"Prepare for Shipping"
+              "message": "\"Prepare for Shipping\""
             }
           }
         }
-      ],
-      "transition": "Order Shipped",
-      "end": false
+      ]
+    },
+    {
+      "name": "Restore Inventory",
+      "type": "operation",
+      "usedForCompensation": true,
+      "actions": [
+        {
+          "name": "printAction",
+          "functionRef": {
+            "refName": "printMessage",
+            "arguments": {
+              "message": "\"Restore Inventory\""
+            }
+          }
+        }
+      ]
     },
     {
       "name": "Forward to External Supplier",
       "type": "operation",
-      "end": false,
+      "transition": "Order Shipped or Cancelled",
+      "compensatedBy": "Cancel Supplier Order",
       "actions": [
         {
           "name": "sendOrderRestCall",
@@ -119,21 +152,78 @@
             }
           }
         }
-      ],
-      "transition": "Order Shipped"
-    }, {
-      "name": "Order Shipped",
+      ]
+    },
+    {
+      "name": "Cancel Supplier Order",
+      "type": "operation",
+      "usedForCompensation": true,
+      "actions": [
+        {
+          "name": "printAction",
+          "functionRef": {
+            "refName": "printMessage",
+            "arguments": {
+              "message": "\"Cancel Supplier Order\""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Order Shipped or Cancelled",
       "type": "event",
+      "transition": "Is Shipped?",
+      "exclusive": true,
       "onEvents": [
         {
           "eventRefs": [
             "shippingEvent"
           ]
+        },
+        {
+          "eventRefs": [
+            "cancelEvent"
+          ],
+          "eventDataFilter": {
+            "data": "{cancel:true}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Is Shipped?",
+      "type": "switch",
+      "dataConditions": [
+        {
+          "name": "order cancelled",
+          "condition": ".cancel == true",
+          "transition": "Compensate Order"
         }
       ],
-      "transition":"Notify Customer",
-      "end": false
-    }, 
+      "defaultCondition": {
+        "transition": "Notify Customer"
+      }
+    },
+    {
+      "name": "Compensate Order",
+      "type": "operation",
+      "actions": [
+        {
+          "name": "printAction",
+          "functionRef": {
+            "refName": "printMessage",
+            "arguments": {
+              "message": "\"Compensate Order\""
+            }
+          }
+        }
+      ],
+      "end": {
+        "terminate": true,
+        "compensate": true
+      }
+    },
     {
       "name": "Notify Customer",
       "type": "operation",
@@ -143,12 +233,14 @@
           "functionRef": {
             "refName": "printMessage",
             "arguments": {
-              "message": "\"Notify Customer"
+              "message": "\"Notify Customer\""
             }
           }
         }
       ],
-      "end": true
+      "end": {
+        "terminate": true
+      }
     }
   ]
 }
